@@ -1,0 +1,10 @@
+
+
+node_modules
+dist
+dist-ssr
+*.local
+.vercel
+Fb_Service_key
+.vercel
+serviceAccountKey.json

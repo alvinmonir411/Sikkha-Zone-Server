@@ -60,9 +60,35 @@ async function run() {
     .collection("AllArticles");
 
   try {
+    // for search data
+    app.get("/Articles/search", async (req, res) => {
+      try {
+        const search = req.query.q;
+        if (!search) {
+          return res.status(400).json({ message: "Search query is required" });
+        }
+
+        const result = await articlescollection
+          .find({
+            $or: [
+              { title: { $regex: search, $options: "i" } },
+              { author: { $regex: search, $options: "i" } },
+              { category: { $regex: search, $options: "i" } },
+              { tags: { $regex: search, $options: "i" } },
+            ],
+          })
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        console.error("Search error:", error.message);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
+    });
+
     // Public routes
     app.get("/FeatureArticles", async (req, res) => {
-      const result = await articlescollection.find().limit(6).toArray();
+      const result = await articlescollection.find().limit(8).toArray();
       res.send(result);
     });
     app.get("/Articles", async (req, res) => {
@@ -82,7 +108,7 @@ async function run() {
     });
 
     // Protected routes
-    app.get("/Articles/id/:id",  async (req, res) => {
+    app.get("/Articles/id/:id", async (req, res) => {
       const { id } = req.params;
       const result = await articlescollection.findOne({
         _id: new ObjectId(id),
@@ -92,7 +118,7 @@ async function run() {
 
     app.post(
       "/Articles/id/:id/comment",
-   
+
       async (req, res) => {
         const { comment, articleId, author_name, author_photoURL } = req.body;
         const { id } = req.params;
@@ -107,7 +133,7 @@ async function run() {
 
     app.post("/Articles/id/:id/like", async (req, res) => {
       const { id } = req.params;
-      const userEmail = req.user.email;
+      const userEmail = req.body.userEmail;
 
       const article = await articlescollection.findOne({
         _id: new ObjectId(id),
@@ -147,13 +173,13 @@ async function run() {
       }
     );
 
-    app.post("/Articles",verifyfirebasetoken,  async (req, res) => {
+    app.post("/Articles", verifyfirebasetoken, async (req, res) => {
       const newArticle = req.body;
       const result = await articlescollection.insertOne(newArticle);
       res.send(result);
     });
 
-    app.put("/Articles/:id",verifyfirebasetoken,  async (req, res) => {
+    app.put("/Articles/:id", verifyfirebasetoken, async (req, res) => {
       const { id } = req.params;
       const updatedArticle = req.body;
       const result = await articlescollection.updateOne(
@@ -171,10 +197,10 @@ async function run() {
       res.send(result);
     });
 
-    // await client.db("admin").command({ ping: 1 });
-    // console.log(
-    //   "Pinged your deployment. You successfully connected to MongoDB!"
-    // );
+    await client.db("admin").command({ ping: 1 });
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!"
+    );
   } finally {
     // Connection remains open
   }

@@ -58,16 +58,27 @@ async function run() {
   const articlescollection = client
     .db("alvinmonir411")
     .collection("AllArticles");
+  const bookmarksCollection = client
+    .db("alvinmonir411")
+    .collection("Bookmarks");
 
   try {
     // for search data
     app.get("/Articles/search", async (req, res) => {
-      try {
-        const search = req.query.q;
-        if (!search) {
-          return res.status(400).json({ message: "Search query is required" });
-        }
+      const { q, sort } = req.query;
+      console.log("Search:", q, "Sort:", sort);
 
+      const search = q || "";
+
+      const sortoption = {};
+      if (sort === "newest") sortoption.date = -1;
+      else if (sort === "oldest") sortoption.date = 1;
+      else if (sort === "liked") sortoption.likeCount = -1;
+      else sortoption.date = -1; // default to newest
+
+      console.log("Sort option:", sortoption);
+
+      try {
         const result = await articlescollection
           .find({
             $or: [
@@ -77,12 +88,13 @@ async function run() {
               { tags: { $regex: search, $options: "i" } },
             ],
           })
+          .sort(sortoption)
           .toArray();
 
         res.send(result);
       } catch (error) {
-        console.error("Search error:", error.message);
-        res.status(500).json({ message: "Internal Server Error" });
+        console.error("Search error:", error);
+        res.status(500).send("Search failed");
       }
     });
 
@@ -108,7 +120,7 @@ async function run() {
     });
 
     // Protected routes
-    app.get("/Articles/id/:id", async (req, res) => {
+    app.get("/Articles/id/:id", verifyfirebasetoken, async (req, res) => {
       const { id } = req.params;
       const result = await articlescollection.findOne({
         _id: new ObjectId(id),
@@ -191,10 +203,123 @@ async function run() {
 
     app.delete("/Articles/id/:id", verifyfirebasetoken, async (req, res) => {
       const { id } = req.params;
+
+      await articlescollection.updateOne({ _id: new ObjectId(id) });
+
       const result = await articlescollection.deleteOne({
         _id: new ObjectId(id),
       });
       res.send(result);
+    });
+    // for admin dashboard
+    app.get("/allarticle", async (req, res) => {
+      const result = await articlescollection.find().toArray();
+      res.send(result);
+    });
+    // Add bookmark
+    app.post("/bookmarks", async (req, res) => {
+      try {
+        const { articleId, userEmail } = req.body;
+        if (!articleId || !userEmail) {
+          return res
+            .status(400)
+            .json({ error: "articleId and userEmail required" });
+        }
+
+        const exists = await bookmarksCollection.findOne({
+          articleId,
+          userEmail,
+        });
+        if (exists) {
+          return res.status(409).json({ message: "Bookmark already exists" });
+        }
+
+        const result = await bookmarksCollection.insertOne({
+          articleId,
+          userEmail,
+          createdAt: new Date(),
+        });
+        res.status(201).json({ insertedId: result.insertedId, success: true });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+
+    // Remove bookmark
+    app.delete("/bookmarks", async (req, res) => {
+      try {
+        const { articleId, userEmail } = req.body;
+        if (!articleId || !userEmail) {
+          return res
+            .status(400)
+            .json({ error: "articleId and userEmail required" });
+        }
+
+        const result = await bookmarksCollection.deleteOne({
+          articleId,
+          userEmail,
+        });
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ message: "Bookmark not found" });
+        }
+
+        res.json({ success: true, message: "Bookmark removed" });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+
+    // Get all bookmarks for a user
+    app.get("/bookmarks/:email", async (req, res) => {
+      try {
+        const userEmail = req.params.email;
+        if (!userEmail)
+          return res.status(400).json({ error: "Email required" });
+
+        // 1. Find bookmarks for the user
+        const bookmarks = await bookmarksCollection
+          .find({ userEmail })
+          .toArray();
+
+        // 2. Extract article IDs from bookmarks
+        const articleIds = bookmarks.map((bm) => new ObjectId(bm.articleId));
+
+        // 3. Fetch articles by these IDs
+        const articles = await articlescollection
+          .find({
+            _id: { $in: articleIds },
+          })
+          .toArray();
+
+        // 4. Return articles
+        res.json(articles);
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+
+    // for visit count
+    app.patch("/articles/:id/visit", async (req, res) => {
+      try {
+        const articleId = req.params.id;
+        console.log(articleId);
+        const result = await articlescollection.findOneAndUpdate(
+          { _id: new ObjectId(articleId) },
+          { $inc: { visitCount: 1 } },
+          { returnDocument: "after" }
+        );
+
+        if (!result.value) {
+          return res.status(404).json({ message: "Article not found" });
+        }
+        res.json({ visitCount: result.value.visitCount });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Internal server error" });
+      }
     });
 
     await client.db("admin").command({ ping: 1 });
